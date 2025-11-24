@@ -1,4 +1,5 @@
 import type { Card } from './types';
+import { ALL_CARDS } from './constants';
 
 export interface YakuResult {
     name: string;
@@ -111,4 +112,24 @@ export function calculateYaku(hand: Card[]): ScoreResult {
     const totalScore = yakuList.reduce((sum, yaku) => sum + yaku.score, 0);
 
     return { yaku: yakuList, totalScore };
+}
+
+export function getCardImagePath(card: Card): string {
+    const monthStr = card.month.toString().padStart(2, '0');
+
+    if (card.type === 'kasu') {
+        if (card.month === 11) {
+            return `/SimpleHanafuda/images/${monthStr}_kasu.svg`;
+        }
+
+        // Find all kasu cards for this month
+        const monthKasuCards = ALL_CARDS.filter(c => c.month === card.month && c.type === 'kasu');
+        // Find index of current card (0-based)
+        const index = monthKasuCards.findIndex(c => c.id === card.id);
+
+        // File names are 1-based (kasu_1, kasu_2)
+        return `/SimpleHanafuda/images/${monthStr}_kasu_${index + 1}.svg`;
+    }
+
+    return `/SimpleHanafuda/images/${monthStr}_${card.type}.svg`;
 }
