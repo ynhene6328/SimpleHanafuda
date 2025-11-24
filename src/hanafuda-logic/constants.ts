@@ -1,4 +1,4 @@
-import { Card } from './types';
+import type { Card } from './types';
 
 export const ALL_CARDS: Card[] = [
     // 1月 (松)

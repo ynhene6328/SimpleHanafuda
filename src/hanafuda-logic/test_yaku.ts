@@ -1,6 +1,6 @@
 import { ALL_CARDS } from './constants';
 import { calculateYaku } from './utils';
-import { Card } from './types';
+import type { Card } from './types';
 
 function testYaku(name: string, handIds: number[]) {
     const hand = handIds.map(id => ALL_CARDS.find(c => c.id === id) as Card);

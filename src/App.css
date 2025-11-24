@@ -11,9 +11,11 @@
   will-change: filter;
   transition: filter 300ms;
 }
+
 .logo:hover {
   filter: drop-shadow(0 0 2em #646cffaa);
 }
+
 .logo.react:hover {
   filter: drop-shadow(0 0 2em #61dafbaa);
 }
@@ -22,6 +24,7 @@
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -39,4 +42,58 @@
 
 .read-the-docs {
   color: #888;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 20px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.area {
+  width: 100%;
+  border: 1px solid #444;
+  padding: 10px;
+  border-radius: 8px;
+  background-color: #2a2a2a;
+}
+
+.hand,
+.field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.card {
+  width: 80px;
+  height: 120px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #fff;
+  color: #000;
+  font-size: 12px;
+  text-align: center;
+  padding: 4px;
+}
+
+.card.back {
+  background-color: #a00;
+  color: #fff;
+  font-size: 24px;
+}
+
+.captured {
+  margin-top: 10px;
+  font-size: 0.9em;
+  color: #aaa;
 }
