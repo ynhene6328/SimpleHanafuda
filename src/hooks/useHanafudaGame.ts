@@ -25,9 +25,14 @@ export const useHanafudaGame = () => {
     const [gameState, setGameState] = useState<GameState | null>(null);
     const [phase, setPhase] = useState<'idle' | 'player-turn' | 'cpu-turn' | 'game-over' | 'koi-koi-chance'>('idle');
     const [lastYakuInfo, setLastYakuInfo] = useState<{ name: string; score: number } | null>(null);
+    const [logs, setLogs] = useState<string[]>([]);
 
     // Track previous scores to detect Yaku updates
     const prevScores = useRef<[number, number]>([0, 0]);
+
+    const addLog = useCallback((message: string) => {
+        setLogs(prev => [...prev, message]);
+    }, []);
 
     const initGame = useCallback(() => {
         const shuffledDeck = shuffle(ALL_CARDS);
@@ -53,11 +58,17 @@ export const useHanafudaGame = () => {
         });
         setPhase('player-turn');
         setLastYakuInfo(null);
+        setLogs(['Game Started!']);
         prevScores.current = [0, 0];
     }, []);
 
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
     const resolveTurn = useCallback(async (playedCard: Card, playerIndex: number) => {
         if (!gameState) return;
+
+        const playerName = playerIndex === 0 ? 'Player' : 'CPU';
+        addLog(`${playerName} played [${playedCard.month}月: ${playedCard.name}]`);
 
         // 1. Match played card with field
         let currentField = [...gameState.field];
@@ -80,23 +91,46 @@ export const useHanafudaGame = () => {
         };
 
         // Step 1: Play from hand
+        await sleep(500);
         const step1 = matchOnField(playedCard, currentField);
         currentField = step1.newField;
-        capturedCards.push(...step1.taken);
 
-        // Step 2: Draw from deck
-        const [drawnCard, ...remainingDeck] = gameState.deck;
-        if (!drawnCard) {
-            // End of deck logic if needed
-            return;
+        if (step1.matched) {
+            addLog(`Matched [${playedCard.name}] with [${step1.taken[1].name}]`);
+            capturedCards.push(...step1.taken);
+        } else {
+            addLog(`No match for [${playedCard.name}] (Discarded)`);
         }
 
+        // Update state after step 1 (visual update)
+        setGameState(prev => {
+            if (!prev) return null;
+            const newPlayers = [...prev.players] as [Player, Player];
+            const currentPlayer = { ...newPlayers[playerIndex] };
+            currentPlayer.hand = currentPlayer.hand.filter(c => c.id !== playedCard.id);
+            return { ...prev, field: currentField, players: newPlayers };
+        });
+
+        // Step 2: Draw from deck
+        await sleep(500);
+        const [drawnCard, ...remainingDeck] = gameState.deck;
+        if (!drawnCard) return;
+
+        addLog(`Drew [${drawnCard.month}月: ${drawnCard.name}] from deck`);
+
         // Step 3: Match drawn card
+        await sleep(500);
         const step2 = matchOnField(drawnCard, currentField);
         currentField = step2.newField;
-        capturedCards.push(...step2.taken);
 
-        // Update State
+        if (step2.matched) {
+            addLog(`Matched [${drawnCard.name}] with [${step2.taken[1].name}]`);
+            capturedCards.push(...step2.taken);
+        } else {
+            addLog(`No match for [${drawnCard.name}] (Discarded)`);
+        }
+
+        // Final Update for this turn
         let newPhase: typeof phase = playerIndex === 0 ? 'cpu-turn' : 'player-turn';
         let yakuUpdateInfo: { name: string; score: number } | null = null;
 
@@ -105,7 +139,7 @@ export const useHanafudaGame = () => {
             const newPlayers = [...prev.players] as [Player, Player];
             const currentPlayer = { ...newPlayers[playerIndex] };
 
-            // Remove played card from hand
+            // Ensure hand is updated (already done above but good to be safe)
             currentPlayer.hand = currentPlayer.hand.filter(c => c.id !== playedCard.id);
 
             // Add captured cards
@@ -117,34 +151,27 @@ export const useHanafudaGame = () => {
 
             // Check for Score Increase (Yaku formed/improved)
             if (currentPlayer.score > prevScores.current[playerIndex]) {
-                // Score increased!
-                // Determine which yaku triggered it (simplified: just show total or last added)
-                // For now, just say "Yaku Formed"
                 const diff = currentPlayer.score - prevScores.current[playerIndex];
-                yakuUpdateInfo = { name: '役成立', score: diff }; // Simplified
-
-                // Update prev score
+                yakuUpdateInfo = { name: '役成立', score: diff };
                 prevScores.current[playerIndex] = currentPlayer.score;
-
-                // Trigger Koi-Koi Chance
                 newPhase = 'koi-koi-chance';
+                addLog(`${playerName} formed Yaku! Score +${diff}`);
             }
 
             newPlayers[playerIndex] = currentPlayer;
 
-            // Check for empty hands -> Round Over (if no koi-koi happened yet, but standard rule is check after turn)
             const handsEmpty = newPlayers[0].hand.length === 0 && newPlayers[1].hand.length === 0;
 
             if (handsEmpty && newPhase !== 'koi-koi-chance') {
-                // Game Over (Draw or end)
                 newPhase = 'game-over';
+                addLog('Round Over (Empty Hands)');
                 return {
                     ...prev,
                     deck: remainingDeck,
                     field: currentField,
                     players: newPlayers,
                     isRoundOver: true,
-                    winner: null, // Draw if ran out of cards without yaku? Or compare scores? Standard is dealer wins or draw.
+                    winner: null,
                 };
             }
 
@@ -162,13 +189,8 @@ export const useHanafudaGame = () => {
             setLastYakuInfo(yakuUpdateInfo);
             setPhase('koi-koi-chance');
 
-            // If CPU, decide immediately (simplified)
             if (playerIndex === 1) {
                 setTimeout(() => {
-                    // CPU always Koi-Koi for now if score < 10, else Stop? 
-                    // Let's make CPU simple: Stop if > 5 points, else Koi-Koi
-                    // Or just random for fun?
-                    // Let's just Stop to show winning.
                     handleShobu();
                 }, 1000);
             }
@@ -176,35 +198,42 @@ export const useHanafudaGame = () => {
             setPhase(newPhase);
         }
 
-    }, [gameState]);
+    }, [gameState, addLog]);
 
     const handleKoiKoi = useCallback(() => {
+        addLog('Player chose Koi-Koi!');
         setPhase(prev => {
             if (!gameState) return 'idle';
-            // Resume turn switching
             const nextTurn = (gameState.currentTurn + 1) % 2;
-            // Check if game over (hands empty)
             if (gameState.players[0].hand.length === 0 && gameState.players[1].hand.length === 0) {
                 return 'game-over';
             }
             return nextTurn === 0 ? 'player-turn' : 'cpu-turn';
         });
         setLastYakuInfo(null);
-    }, [gameState]);
+    }, [gameState, addLog]);
 
     const handleShobu = useCallback(() => {
-        if (!gameState) return;
+        // We need to access the current state, but handleShobu is a callback.
+        // We can use a functional update or ref if needed, but here we rely on the closure or state update.
+        // Ideally, we should pass the winner info or derive it.
+        // Let's assume the current turn player is the winner (since they chose Shobu).
+
         setGameState(prev => {
             if (!prev) return null;
+            const winnerName = prev.currentTurn === 0 ? 'Player' : 'CPU';
+            // Note: We can't call addLog here easily because it's inside setGameState (pure function expected ideally, though React allows side effects sometimes, it's bad practice).
+            // Better to call addLog outside.
             return {
                 ...prev,
                 isRoundOver: true,
                 winner: prev.currentTurn,
             };
         });
+        addLog(`Round Over! Winner decided.`);
         setPhase('game-over');
         setLastYakuInfo(null);
-    }, [gameState]);
+    }, [addLog]);
 
 
     // Improved CPU Logic
@@ -215,33 +244,21 @@ export const useHanafudaGame = () => {
         const field = gameState.field;
         if (cpuHand.length === 0) return;
 
-        // 1. Check for matches
-        // Priority: Match > Random
-        // Better Priority: Match High Value (Hikari/Tane) > Match Any > Discard Kasu > Discard Any
-
         let bestCard = cpuHand[0];
-        let foundMatch = false;
 
-        // Find matches
         const matchableCards = cpuHand.filter(handCard =>
             field.some(fieldCard => fieldCard.month === handCard.month)
         );
 
         if (matchableCards.length > 0) {
-            // Pick best match
-            // Sort by type value: hikari > tane > tan > kasu
             const typeValue = { hikari: 4, tane: 3, tan: 2, kasu: 1 };
             matchableCards.sort((a, b) => typeValue[b.type] - typeValue[a.type]);
             bestCard = matchableCards[0];
-            foundMatch = true;
         } else {
-            // No match, discard logic
-            // Discard Kasu first
             const kasuCards = cpuHand.filter(c => c.type === 'kasu');
             if (kasuCards.length > 0) {
                 bestCard = kasuCards[0];
             } else {
-                // Discard lowest value
                 const typeValue = { hikari: 4, tane: 3, tan: 2, kasu: 1 };
                 const sortedHand = [...cpuHand].sort((a, b) => typeValue[a.type] - typeValue[b.type]);
                 bestCard = sortedHand[0];
@@ -259,6 +276,7 @@ export const useHanafudaGame = () => {
         gameState,
         phase,
         lastYakuInfo,
+        logs,
         initGame,
         playCard: (card: Card) => resolveTurn(card, 0),
         cpuTurn,

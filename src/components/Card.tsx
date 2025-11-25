@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import type { Card as CardType } from '../hanafuda-logic/types';
 import { getCardImagePath } from '../hanafuda-logic/utils';
 
@@ -20,13 +21,19 @@ export const Card: React.FC<CardProps> = ({
     const imagePath = getCardImagePath(card);
 
     return (
-        <div
+        <motion.div
+            layout
+            layoutId={`card-${card.id}`}
             className={`
                 relative w-16 h-24 rounded-md shadow-md transition-transform duration-200
                 ${isSelectable ? 'cursor-pointer hover:-translate-y-2 hover:shadow-lg' : ''}
                 ${className}
             `}
             onClick={() => isSelectable && onClick && onClick(card)}
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.8, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
         >
             {isFaceUp ? (
                 <img
@@ -40,6 +47,6 @@ export const Card: React.FC<CardProps> = ({
                     <span className="text-white font-bold text-xs opacity-50">Back</span>
                 </div>
             )}
-        </div>
+        </motion.div>
     );
 };

@@ -1,11 +1,14 @@
 import React from 'react';
 import { Card } from './Card';
 import { KoiKoiModal } from './KoiKoiModal';
-import type { GameState, Card as CardType, Player } from '../hanafuda-logic/types';
+import { LogWindow } from './LogWindow';
+import type { GameState, Card as CardType } from '../hanafuda-logic/types';
+import { AnimatePresence, LayoutGroup } from 'framer-motion';
 
 interface GameBoardProps {
     gameState: GameState;
     phase: 'idle' | 'player-turn' | 'cpu-turn' | 'game-over' | 'koi-koi-chance';
+    logs: string[];
     onPlayCard: (card: CardType) => void;
     onKoiKoi: () => void;
     onShobu: () => void;
@@ -16,6 +19,7 @@ interface GameBoardProps {
 export const GameBoard: React.FC<GameBoardProps> = ({
     gameState,
     phase,
+    logs,
     onPlayCard,
     onKoiKoi,
     onShobu,
@@ -41,76 +45,93 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 </div>
             </div>
 
-            {/* CPU Area */}
-            <div className="flex-1 flex flex-col items-center justify-start py-4 border-b border-white/10">
-                <div className="w-full max-w-4xl flex justify-between items-start px-4">
-                    {/* CPU Hand */}
-                    <div className="flex -space-x-8">
-                        {cpu.hand.map((card) => (
-                            <Card
-                                key={card.id}
-                                card={card}
-                                isFaceUp={false}
-                                className="transform hover:-translate-y-0" // Disable hover for CPU cards
-                            />
-                        ))}
-                    </div>
-
-                    {/* CPU Captured */}
-                    <div className="flex flex-wrap gap-1 w-64 justify-end">
-                        {cpu.captured.map((card) => (
-                            <Card
-                                key={card.id}
-                                card={card}
-                                className="w-8 h-12 !static" // Smaller size for captured
-                            />
-                        ))}
-                    </div>
-                </div>
+            {/* Log Window - Floating on the right side, below status */}
+            <div className="absolute top-40 right-4 w-64 z-10 opacity-90 hover:opacity-100 transition-opacity">
+                <LogWindow logs={logs} />
             </div>
 
-            {/* Field Area */}
-            <div className="flex-[2] flex items-center justify-center py-8">
-                <div className="grid grid-cols-6 gap-4">
-                    {field.map((card) => (
-                        <Card
-                            key={card.id}
-                            card={card}
-                            isFaceUp={true}
-                        />
-                    ))}
-                </div>
-            </div>
+            <LayoutGroup>
+                {/* CPU Area */}
+                <div className="flex-1 flex flex-col items-center justify-start py-4 border-b border-white/10">
+                    <div className="w-full max-w-4xl flex justify-between items-start px-4">
+                        {/* CPU Hand */}
+                        <div className="flex -space-x-8">
+                            <AnimatePresence>
+                                {cpu.hand.map((card) => (
+                                    <Card
+                                        key={card.id}
+                                        card={card}
+                                        isFaceUp={false}
+                                        className="transform hover:-translate-y-0" // Disable hover for CPU cards
+                                    />
+                                ))}
+                            </AnimatePresence>
+                        </div>
 
-            {/* Player Area */}
-            <div className="flex-1 flex flex-col items-center justify-end py-4 border-t border-white/10">
-                <div className="w-full max-w-4xl flex justify-between items-end px-4">
-                    {/* Player Hand */}
-                    <div className="flex -space-x-4">
-                        {player.hand.map((card) => (
-                            <Card
-                                key={card.id}
-                                card={card}
-                                isFaceUp={true}
-                                isSelectable={phase === 'player-turn'}
-                                onClick={onPlayCard}
-                                className="transition-all hover:z-10"
-                            />
-                        ))}
-                    </div>
-
-                    {/* Player Captured */}
-                    <div className="flex flex-wrap gap-1 w-64 justify-end">
-                        {player.captured.map((card) => (
-                            <Card
-                                key={card.id}
-                                card={card}
-                                className="w-8 h-12 !static"
-                            />
-                        ))}
+                        {/* CPU Captured */}
+                        <div className="flex flex-wrap gap-1 w-64 justify-end">
+                            <AnimatePresence>
+                                {cpu.captured.map((card) => (
+                                    <Card
+                                        key={card.id}
+                                        card={card}
+                                        className="w-8 h-12 !static" // Smaller size for captured
+                                    />
+                                ))}
+                            </AnimatePresence>
+                        </div>
                     </div>
                 </div>
-            </div>
+
+                {/* Field Area */}
+                <div className="flex-[2] flex items-center justify-center py-8">
+                    <div className="grid grid-cols-6 gap-4">
+                        <AnimatePresence>
+                            {field.map((card) => (
+                                <Card
+                                    key={card.id}
+                                    card={card}
+                                    isFaceUp={true}
+                                />
+                            ))}
+                        </AnimatePresence>
+                    </div>
+                </div>
+
+                {/* Player Area */}
+                <div className="flex-1 flex flex-col items-center justify-end py-4 border-t border-white/10">
+                    <div className="w-full max-w-4xl flex justify-between items-end px-4">
+                        {/* Player Hand */}
+                        <div className="flex -space-x-4">
+                            <AnimatePresence>
+                                {player.hand.map((card) => (
+                                    <Card
+                                        key={card.id}
+                                        card={card}
+                                        isFaceUp={true}
+                                        isSelectable={phase === 'player-turn'}
+                                        onClick={onPlayCard}
+                                        className="transition-all hover:z-10"
+                                    />
+                                ))}
+                            </AnimatePresence>
+                        </div>
+
+                        {/* Player Captured */}
+                        <div className="flex flex-wrap gap-1 w-64 justify-end">
+                            <AnimatePresence>
+                                {player.captured.map((card) => (
+                                    <Card
+                                        key={card.id}
+                                        card={card}
+                                        className="w-8 h-12 !static"
+                                    />
+                                ))}
+                            </AnimatePresence>
+                        </div>
+                    </div>
+                </div>
+            </LayoutGroup>
 
             {/* Modals & Overlays */}
             {phase === 'koi-koi-chance' && lastYakuInfo && (

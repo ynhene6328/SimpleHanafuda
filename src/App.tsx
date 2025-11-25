@@ -8,6 +8,7 @@ function App() {
     gameState,
     phase,
     lastYakuInfo,
+    logs,
     initGame,
     playCard,
     cpuTurn,
@@ -40,6 +41,7 @@ function App() {
     <GameBoard
       gameState={gameState}
       phase={phase}
+      logs={logs}
       onPlayCard={playCard}
       onKoiKoi={handleKoiKoi}
       onShobu={handleShobu}
