@@ -1,12 +1,11 @@
-export type Month = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
-
 export type CardType = 'hikari' | 'tane' | 'tan' | 'kasu';
 
 export interface Card {
-    id: number; // Unique ID 0-47
-    month: Month;
+    id: number;
+    month: number; // 1-12
     type: CardType;
-    name?: string; // Optional name for debugging/display
+    name: string;
+    image?: string; // Path to image asset
 }
 
 export interface Player {
@@ -27,3 +26,15 @@ export interface GameState {
     isRoundOver: boolean;
     winner: number | null; // 0 or 1, or null
 }
+
+export type GamePhase =
+    | 'idle'
+    | 'waiting-input'   // Player's turn: waiting to select a card from hand
+    | 'select-match'    // Player's turn: waiting to select which card to match (if 2 matches)
+    | 'resolve-hand'    // Processing hand card match/discard
+    | 'draw-deck'       // Drawing from deck animation
+    | 'resolve-deck'    // Processing deck card match/discard
+    | 'check-yaku'      // Checking for Yaku
+    | 'koi-koi-decision'// Waiting for Koi-Koi decision
+    | 'cpu-turn'        // CPU is thinking/acting
+    | 'game-over';

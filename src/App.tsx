@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { useHanafudaGame } from './hooks/useHanafudaGame';
 import { GameBoard } from './components/GameBoard';
 import './App.css';
@@ -9,19 +8,15 @@ function App() {
     phase,
     lastYakuInfo,
     logs,
+    matchOptions,
     initGame,
     playCard,
-    cpuTurn,
+    selectMatch,
     handleKoiKoi,
     handleShobu
   } = useHanafudaGame();
 
-  // Auto-start CPU turn
-  useEffect(() => {
-    if (phase === 'cpu-turn') {
-      cpuTurn();
-    }
-  }, [phase, cpuTurn]);
+  // Auto-start CPU turn is now handled inside the hook's useEffect
 
   if (!gameState) {
     return (
@@ -42,7 +37,9 @@ function App() {
       gameState={gameState}
       phase={phase}
       logs={logs}
+      matchOptions={matchOptions}
       onPlayCard={playCard}
+      onSelectMatch={selectMatch}
       onKoiKoi={handleKoiKoi}
       onShobu={handleShobu}
       onRestart={initGame}

@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from 'react';
-import type { Card, GameState, Player } from '../hanafuda-logic/types';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import type { Card, GameState, Player, GamePhase } from '../hanafuda-logic/types';
 import { ALL_CARDS } from '../hanafuda-logic/constants';
 import { calculateYaku } from '../hanafuda-logic/utils';
 
@@ -23,16 +23,26 @@ const INITIAL_PLAYER_STATE: Player = {
 
 export const useHanafudaGame = () => {
     const [gameState, setGameState] = useState<GameState | null>(null);
-    const [phase, setPhase] = useState<'idle' | 'player-turn' | 'cpu-turn' | 'game-over' | 'koi-koi-chance'>('idle');
+    const [phase, setPhase] = useState<GamePhase>('idle');
     const [lastYakuInfo, setLastYakuInfo] = useState<{ name: string; score: number } | null>(null);
     const [logs, setLogs] = useState<string[]>([]);
+
+    // State for intermediate turn processing
+    const [pendingCard, setPendingCard] = useState<Card | null>(null); // Card currently being played/drawn
+    const [matchOptions, setMatchOptions] = useState<Card[]>([]); // Field cards that can be matched (for selection)
+    const [turnSource, setTurnSource] = useState<'hand' | 'deck'>('hand'); // Are we processing hand or deck?
 
     // Track previous scores to detect Yaku updates
     const prevScores = useRef<[number, number]>([0, 0]);
 
+    // Lock for async operations to prevent race conditions (double-clicks)
+    const isProcessing = useRef(false);
+
     const addLog = useCallback((message: string) => {
         setLogs(prev => [...prev, message]);
     }, []);
+
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
     const initGame = useCallback(() => {
         const shuffledDeck = shuffle(ALL_CARDS);
@@ -56,230 +66,387 @@ export const useHanafudaGame = () => {
             isRoundOver: false,
             winner: null,
         });
-        setPhase('player-turn');
+        setPhase('waiting-input');
         setLastYakuInfo(null);
         setLogs(['Game Started!']);
         prevScores.current = [0, 0];
-    }, []);
-
-    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-    const resolveTurn = useCallback(async (playedCard: Card, playerIndex: number) => {
-        if (!gameState) return;
-
-        const playerName = playerIndex === 0 ? 'Player' : 'CPU';
-        addLog(`${playerName} played [${playedCard.month}月: ${playedCard.name}]`);
-
-        // 1. Match played card with field
-        let currentField = [...gameState.field];
-        let capturedCards: Card[] = [];
-
-        const matchOnField = (card: Card, field: Card[]): { matched: boolean, taken: Card[], newField: Card[] } => {
-            const matches = field.filter(c => c.month === card.month);
-            if (matches.length === 0) {
-                return { matched: false, taken: [], newField: [...field, card] };
-            } else if (matches.length === 1) {
-                return { matched: true, taken: [card, matches[0]], newField: field.filter(c => c.id !== matches[0].id) };
-            } else if (matches.length === 2) {
-                // 2 matches, choose one (simplified: take first one for now)
-                return { matched: true, taken: [card, matches[0]], newField: field.filter(c => c.id !== matches[0].id) };
-            } else if (matches.length === 3) {
-                // 3 matches, take all (4 cards total)
-                return { matched: true, taken: [card, ...matches], newField: field.filter(c => c.month !== card.month) };
-            }
-            return { matched: false, taken: [], newField: field };
-        };
-
-        // Step 1: Play from hand
-        await sleep(500);
-        const step1 = matchOnField(playedCard, currentField);
-        currentField = step1.newField;
-
-        if (step1.matched) {
-            addLog(`Matched [${playedCard.name}] with [${step1.taken[1].name}]`);
-            capturedCards.push(...step1.taken);
-        } else {
-            addLog(`No match for [${playedCard.name}] (Discarded)`);
-        }
-
-        // Update state after step 1 (visual update)
-        setGameState(prev => {
-            if (!prev) return null;
-            const newPlayers = [...prev.players] as [Player, Player];
-            const currentPlayer = { ...newPlayers[playerIndex] };
-            currentPlayer.hand = currentPlayer.hand.filter(c => c.id !== playedCard.id);
-            return { ...prev, field: currentField, players: newPlayers };
-        });
-
-        // Step 2: Draw from deck
-        await sleep(500);
-        const [drawnCard, ...remainingDeck] = gameState.deck;
-        if (!drawnCard) return;
-
-        addLog(`Drew [${drawnCard.month}月: ${drawnCard.name}] from deck`);
-
-        // Step 3: Match drawn card
-        await sleep(500);
-        const step2 = matchOnField(drawnCard, currentField);
-        currentField = step2.newField;
-
-        if (step2.matched) {
-            addLog(`Matched [${drawnCard.name}] with [${step2.taken[1].name}]`);
-            capturedCards.push(...step2.taken);
-        } else {
-            addLog(`No match for [${drawnCard.name}] (Discarded)`);
-        }
-
-        // Final Update for this turn
-        let newPhase: typeof phase = playerIndex === 0 ? 'cpu-turn' : 'player-turn';
-        let yakuUpdateInfo: { name: string; score: number } | null = null;
-
-        setGameState(prev => {
-            if (!prev) return null;
-            const newPlayers = [...prev.players] as [Player, Player];
-            const currentPlayer = { ...newPlayers[playerIndex] };
-
-            // Ensure hand is updated (already done above but good to be safe)
-            currentPlayer.hand = currentPlayer.hand.filter(c => c.id !== playedCard.id);
-
-            // Add captured cards
-            currentPlayer.captured = [...currentPlayer.captured, ...capturedCards];
-
-            // Calculate Score
-            const scoreResult = calculateYaku(currentPlayer.captured);
-            currentPlayer.score = scoreResult.totalScore;
-
-            // Check for Score Increase (Yaku formed/improved)
-            if (currentPlayer.score > prevScores.current[playerIndex]) {
-                const diff = currentPlayer.score - prevScores.current[playerIndex];
-                yakuUpdateInfo = { name: '役成立', score: diff };
-                prevScores.current[playerIndex] = currentPlayer.score;
-                newPhase = 'koi-koi-chance';
-                addLog(`${playerName} formed Yaku! Score +${diff}`);
-            }
-
-            newPlayers[playerIndex] = currentPlayer;
-
-            const handsEmpty = newPlayers[0].hand.length === 0 && newPlayers[1].hand.length === 0;
-
-            if (handsEmpty && newPhase !== 'koi-koi-chance') {
-                newPhase = 'game-over';
-                addLog('Round Over (Empty Hands)');
-                return {
-                    ...prev,
-                    deck: remainingDeck,
-                    field: currentField,
-                    players: newPlayers,
-                    isRoundOver: true,
-                    winner: null,
-                };
-            }
-
-            return {
-                ...prev,
-                deck: remainingDeck,
-                field: currentField,
-                players: newPlayers,
-                currentTurn: newPhase === 'koi-koi-chance' ? prev.currentTurn : (prev.currentTurn + 1) % 2,
-                isRoundOver: false,
-            };
-        });
-
-        if (yakuUpdateInfo) {
-            setLastYakuInfo(yakuUpdateInfo);
-            setPhase('koi-koi-chance');
-
-            if (playerIndex === 1) {
-                setTimeout(() => {
-                    handleShobu();
-                }, 1000);
-            }
-        } else {
-            setPhase(newPhase);
-        }
-
-    }, [gameState, addLog]);
-
-    const handleKoiKoi = useCallback(() => {
-        addLog('Player chose Koi-Koi!');
-        setPhase(prev => {
-            if (!gameState) return 'idle';
-            const nextTurn = (gameState.currentTurn + 1) % 2;
-            if (gameState.players[0].hand.length === 0 && gameState.players[1].hand.length === 0) {
-                return 'game-over';
-            }
-            return nextTurn === 0 ? 'player-turn' : 'cpu-turn';
-        });
-        setLastYakuInfo(null);
-    }, [gameState, addLog]);
-
-    const handleShobu = useCallback(() => {
-        // We need to access the current state, but handleShobu is a callback.
-        // We can use a functional update or ref if needed, but here we rely on the closure or state update.
-        // Ideally, we should pass the winner info or derive it.
-        // Let's assume the current turn player is the winner (since they chose Shobu).
-
-        setGameState(prev => {
-            if (!prev) return null;
-            const winnerName = prev.currentTurn === 0 ? 'Player' : 'CPU';
-            // Note: We can't call addLog here easily because it's inside setGameState (pure function expected ideally, though React allows side effects sometimes, it's bad practice).
-            // Better to call addLog outside.
-            return {
-                ...prev,
-                isRoundOver: true,
-                winner: prev.currentTurn,
-            };
-        });
-        addLog(`Round Over! Winner decided.`);
-        setPhase('game-over');
-        setLastYakuInfo(null);
+        setPendingCard(null);
+        setMatchOptions([]);
+        isProcessing.current = false;
     }, [addLog]);
 
+    // --- Core Logic Helpers ---
 
-    // Improved CPU Logic
-    const cpuTurn = useCallback(() => {
-        if (!gameState || phase !== 'cpu-turn') return;
+    const findMatches = (card: Card, field: Card[]): Card[] => {
+        return field.filter(c => c.month === card.month);
+    };
 
-        const cpuHand = gameState.players[1].hand;
-        const field = gameState.field;
-        if (cpuHand.length === 0) return;
+    // --- State Machine Actions ---
 
-        let bestCard = cpuHand[0];
+    // 1. Player selects a card from hand
+    const playCard = useCallback(async (card: Card) => {
+        if (!gameState || phase !== 'waiting-input' || isProcessing.current) return;
+        isProcessing.current = true;
 
-        const matchableCards = cpuHand.filter(handCard =>
-            field.some(fieldCard => fieldCard.month === handCard.month)
-        );
+        setPendingCard(card);
+        setTurnSource('hand');
+        addLog(`Player played [${card.name}]`);
 
-        if (matchableCards.length > 0) {
-            const typeValue = { hikari: 4, tane: 3, tan: 2, kasu: 1 };
-            matchableCards.sort((a, b) => typeValue[b.type] - typeValue[a.type]);
-            bestCard = matchableCards[0];
+        // Remove from hand immediately for visual feedback
+        setGameState(prev => {
+            if (!prev) return null;
+            const newPlayers = [...prev.players] as [Player, Player];
+            newPlayers[0].hand = newPlayers[0].hand.filter(c => c.id !== card.id);
+            return { ...prev, players: newPlayers };
+        });
+
+        const matches = findMatches(card, gameState.field);
+
+        if (matches.length === 2) {
+            // Ambiguous match -> User must select
+            setMatchOptions(matches);
+            setPhase('select-match');
+            addLog('Select a card to match.');
+            isProcessing.current = false; // Allow input for selection
         } else {
-            const kasuCards = cpuHand.filter(c => c.type === 'kasu');
-            if (kasuCards.length > 0) {
-                bestCard = kasuCards[0];
-            } else {
-                const typeValue = { hikari: 4, tane: 3, tan: 2, kasu: 1 };
-                const sortedHand = [...cpuHand].sort((a, b) => typeValue[a.type] - typeValue[b.type]);
-                bestCard = sortedHand[0];
-            }
+            // 0, 1, or 3 matches -> Auto resolve
+            setPhase('resolve-hand'); // Block input
+            await resolveMatch(card, matches, 'hand');
+            isProcessing.current = false;
+        }
+    }, [gameState, phase, addLog]);
+
+    // 2. Resolve Match (Common for Hand and Deck)
+    const resolveMatch = async (card: Card, matches: Card[], source: 'hand' | 'deck', selectedMatchId?: number) => {
+        if (!gameState) return;
+
+        let taken: Card[] = [];
+        let newField = [...gameState.field];
+
+        if (matches.length === 0) {
+            // Discard
+            newField.push(card);
+            addLog(`No match. Discarded to field.`);
+        } else if (matches.length === 1) {
+            // Single match
+            taken = [card, matches[0]];
+            newField = newField.filter(c => c.id !== matches[0].id);
+            addLog(`Matched with [${matches[0].name}]`);
+        } else if (matches.length === 2) {
+            // 2 matches - use selectedMatchId
+            const target = matches.find(c => c.id === selectedMatchId) || matches[0]; // Fallback should not happen in correct flow
+            taken = [card, target];
+            newField = newField.filter(c => c.id !== target.id);
+            addLog(`Matched with [${target.name}]`);
+        } else if (matches.length === 3) {
+            // 3 matches - take all (Hikari-Kuttsuki rule usually, or just take all 3 + played = 4)
+            taken = [card, ...matches];
+            newField = newField.filter(c => c.month !== card.month);
+            addLog(`Matched all 3 cards!`);
         }
 
-        // Simulate delay
-        setTimeout(() => {
-            resolveTurn(bestCard, 1);
-        }, 1000);
+        // Update State with result
+        setGameState(prev => {
+            if (!prev) return null;
+            const currentPlayerIdx = prev.currentTurn;
+            const newPlayers = [...prev.players] as [Player, Player];
 
-    }, [gameState, phase, resolveTurn]);
+            // Deduplicate: Ensure we don't add cards that are already captured
+            const currentCapturedIds = new Set(newPlayers[currentPlayerIdx].captured.map(c => c.id));
+            const uniqueTaken = taken.filter(c => !currentCapturedIds.has(c.id));
+
+            if (uniqueTaken.length !== taken.length) {
+                console.warn('[WARNING] Attempted to capture duplicate cards:', taken);
+            }
+
+            newPlayers[currentPlayerIdx].captured = [...newPlayers[currentPlayerIdx].captured, ...uniqueTaken];
+            return { ...prev, field: newField, players: newPlayers };
+        });
+
+        // DEBUG: Log captured cards to verify state
+        if (gameState) {
+            const currentPlayerIdx = gameState.currentTurn;
+            const currentCaptured = gameState.players[currentPlayerIdx].captured;
+            const newCaptured = [...currentCaptured, ...taken];
+            const capturedNames = newCaptured.map(c => c.name).join(', ');
+            addLog(`[DEBUG] Captured (${newCaptured.length}): ${capturedNames}`);
+        }
+
+        setPendingCard(null);
+        setMatchOptions([]);
+
+        // Transition to next phase
+        if (source === 'hand') {
+            setPhase('draw-deck');
+        } else {
+            setPhase('check-yaku');
+        }
+    };
+
+    // 3. User selects a match (from UI)
+    const selectMatch = useCallback(async (fieldCard: Card) => {
+        if (phase !== 'select-match' || !pendingCard || isProcessing.current) return;
+        isProcessing.current = true;
+
+        // Validate selection
+        if (!matchOptions.some(c => c.id === fieldCard.id)) {
+            isProcessing.current = false;
+            return;
+        }
+
+        setPhase(turnSource === 'hand' ? 'resolve-hand' : 'resolve-deck'); // Immediate transition
+        await resolveMatch(pendingCard, matchOptions, turnSource, fieldCard.id);
+        isProcessing.current = false;
+    }, [phase, pendingCard, matchOptions, turnSource, gameState]);
+
+    // 6. End Turn / Switch Player
+    const endTurn = async () => {
+        if (!gameState) return;
+
+        // Check for empty hands (Game Over)
+        if (gameState.players[0].hand.length === 0 && gameState.players[1].hand.length === 0) {
+            setPhase('game-over');
+            setGameState(prev => ({ ...prev!, isRoundOver: true, winner: null })); // Draw or check scores
+            addLog('Round Over (Empty Hands)');
+            return;
+        }
+
+        const nextTurn = (gameState.currentTurn + 1) % 2;
+        setGameState(prev => ({ ...prev!, currentTurn: nextTurn }));
+
+        if (nextTurn === 0) {
+            setPhase('waiting-input');
+        } else {
+            setPhase('cpu-turn');
+        }
+    };
+
+    // 4a. Draw from Deck (Initiate)
+    useEffect(() => {
+        let isCancelled = false;
+
+        if (phase === 'draw-deck' && gameState && !pendingCard) {
+            const draw = async () => {
+                await sleep(500); // Animation delay
+                if (isCancelled) return;
+
+                const [drawnCard, ...remainingDeck] = gameState.deck;
+                if (!drawnCard) {
+                    setPhase('check-yaku'); // Or game over
+                    return;
+                }
+
+                setGameState(prev => ({ ...prev!, deck: remainingDeck }));
+                setTurnSource('deck');
+                setPendingCard(drawnCard);
+                addLog(`Drew [${drawnCard.name}] from deck`);
+            };
+            draw();
+        }
+        return () => { isCancelled = true; };
+    }, [phase, gameState?.deck, pendingCard]);
+
+    // 4b. Draw from Deck (Resolve)
+    useEffect(() => {
+        let isCancelled = false;
+
+        if (phase === 'draw-deck' && gameState && pendingCard) {
+            const resolve = async () => {
+                await sleep(500); // Wait for user to see the card
+                if (isCancelled) return;
+
+                const matches = findMatches(pendingCard, gameState.field);
+
+                if (matches.length === 2 && gameState.currentTurn === 0) {
+                    // Player drew ambiguous match -> Select
+                    setMatchOptions(matches);
+                    setPhase('select-match');
+                    addLog('Select a card to match.');
+                } else {
+                    // CPU or auto-resolve
+                    let targetId: number | undefined;
+                    if (matches.length === 2 && gameState.currentTurn === 1) {
+                        targetId = matches[0].id;
+                    }
+                    await resolveMatch(pendingCard, matches, 'deck', targetId);
+                }
+            };
+            resolve();
+        }
+        return () => { isCancelled = true; };
+    }, [phase, pendingCard]);
+
+    // 5. Check Yaku (Auto-triggered effect)
+    useEffect(() => {
+        let isCancelled = false;
+
+        // Use isProcessing to prevent re-entry during state updates
+        if (phase === 'check-yaku' && gameState && !isProcessing.current) {
+            isProcessing.current = true;
+            const check = async () => {
+                if (isCancelled) { isProcessing.current = false; return; }
+
+                const currentPlayerIdx = gameState.currentTurn;
+                const player = gameState.players[currentPlayerIdx];
+                const scoreResult = calculateYaku(player.captured);
+                const currentScore = scoreResult.totalScore;
+                const prevScore = prevScores.current[currentPlayerIdx];
+
+                // Update score in state
+                setGameState(prev => {
+                    if (!prev) return null;
+                    const newPlayers = [...prev.players] as [Player, Player];
+                    newPlayers[currentPlayerIdx].score = currentScore;
+                    return { ...prev, players: newPlayers };
+                });
+
+                if (currentScore > prevScore) {
+                    // Yaku formed/improved!
+                    const diff = currentScore - prevScore;
+                    addLog(`${currentPlayerIdx === 0 ? 'Player' : 'CPU'} formed Yaku! (+${diff})`);
+
+                    setLastYakuInfo({ name: '役成立', score: diff }); // Simplified name
+                    setPhase('koi-koi-decision');
+                } else {
+                    // No new Yaku -> Next Turn
+                    await endTurn();
+                }
+                isProcessing.current = false;
+            };
+            check();
+        }
+        return () => { isCancelled = true; isProcessing.current = false; };
+    }, [phase]);
+
+    // 7a. CPU Turn (Decide & Play)
+    useEffect(() => {
+        let isCancelled = false;
+
+        if (phase === 'cpu-turn' && gameState && gameState.currentTurn === 1 && !pendingCard) {
+            const executeCpuTurn = async () => {
+                await sleep(1000); // Thinking time
+                if (isCancelled) return;
+
+                const cpuHand = gameState.players[1].hand;
+                const field = gameState.field;
+
+                // --- CPU AI Logic ---
+                let bestCard = cpuHand[0];
+                const matchableCards = cpuHand.filter(handCard =>
+                    field.some(fieldCard => fieldCard.month === handCard.month)
+                );
+
+                if (matchableCards.length > 0) {
+                    // Priority: Hikari > Tane > Tan > Kasu
+                    const typeValue = { hikari: 4, tane: 3, tan: 2, kasu: 1 };
+                    matchableCards.sort((a, b) => typeValue[b.type] - typeValue[a.type]);
+                    bestCard = matchableCards[0];
+                } else {
+                    // Discard: Kasu first
+                    const kasuCards = cpuHand.filter(c => c.type === 'kasu');
+                    if (kasuCards.length > 0) {
+                        bestCard = kasuCards[0];
+                    } else {
+                        // Sort by value ascending (discard low value)
+                        const typeValue = { hikari: 4, tane: 3, tan: 2, kasu: 1 };
+                        const sortedHand = [...cpuHand].sort((a, b) => typeValue[a.type] - typeValue[b.type]);
+                        bestCard = sortedHand[0];
+                    }
+                }
+
+                // Execute Play
+                setGameState(prev => {
+                    if (!prev) return null;
+                    const newPlayers = [...prev.players] as [Player, Player];
+                    newPlayers[1].hand = newPlayers[1].hand.filter(c => c.id !== bestCard.id);
+                    return { ...prev, players: newPlayers };
+                });
+
+                setTurnSource('hand');
+                setPendingCard(bestCard);
+                addLog(`CPU played [${bestCard.name}]`);
+            };
+            executeCpuTurn();
+        }
+        return () => { isCancelled = true; };
+    }, [phase, pendingCard]);
+
+    // 7b. CPU Turn (Resolve)
+    useEffect(() => {
+        let isCancelled = false;
+
+        if (phase === 'cpu-turn' && gameState && pendingCard) {
+            const resolve = async () => {
+                await sleep(500);
+                if (isCancelled) return;
+
+                const matches = findMatches(pendingCard, gameState.field);
+
+                // CPU 2-match selection logic
+                let targetId: number | undefined;
+                if (matches.length === 2) {
+                    // Simple logic: pick first
+                    targetId = matches[0].id;
+                }
+
+                await resolveMatch(pendingCard, matches, 'hand', targetId);
+            };
+            resolve();
+        }
+        return () => { isCancelled = true; };
+    }, [phase, pendingCard]);
+
+    // 8. Koi-Koi Decision Handling
+    useEffect(() => {
+        let isCancelled = false;
+
+        if (phase === 'koi-koi-decision' && gameState?.currentTurn === 1 && !isProcessing.current) {
+            isProcessing.current = true;
+            // CPU Decision
+            const cpuDecide = async () => {
+                await sleep(1000);
+                if (isCancelled) { isProcessing.current = false; return; }
+                // Simple AI: Always Koi-Koi if score < 10, else Shobu?
+                // Let's just Stop to show winning for now.
+                handleShobu();
+                isProcessing.current = false;
+            };
+            cpuDecide();
+        }
+        return () => { isCancelled = true; isProcessing.current = false; };
+    }, [phase]);
+
+    const handleKoiKoi = useCallback(() => {
+        if (!gameState) return;
+        const currentPlayerIdx = gameState.currentTurn;
+        prevScores.current[currentPlayerIdx] = gameState.players[currentPlayerIdx].score;
+
+        addLog('Koi-Koi! Game continues.');
+        setLastYakuInfo(null);
+        endTurn(); // Proceed to next turn
+    }, [gameState]);
+
+    const handleShobu = useCallback(() => {
+        if (!gameState) return;
+        addLog(`${gameState.currentTurn === 0 ? 'Player' : 'CPU'} chose Shobu!`);
+        setGameState(prev => ({
+            ...prev!,
+            isRoundOver: true,
+            winner: prev!.currentTurn,
+        }));
+        setPhase('game-over');
+        setLastYakuInfo(null);
+    }, [gameState]);
 
     return {
         gameState,
         phase,
         lastYakuInfo,
         logs,
+        matchOptions, // Export for UI
         initGame,
-        playCard: (card: Card) => resolveTurn(card, 0),
-        cpuTurn,
+        playCard,
+        selectMatch, // Export for UI
         handleKoiKoi,
         handleShobu,
     };
