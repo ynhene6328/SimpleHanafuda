@@ -13,7 +13,8 @@ function App() {
     playCard,
     selectMatch,
     handleKoiKoi,
-    handleShobu
+    handleShobu,
+    pendingCard
   } = useHanafudaGame();
 
   // Auto-start CPU turn is now handled inside the hook's useEffect
@@ -44,6 +45,7 @@ function App() {
       onShobu={handleShobu}
       onRestart={initGame}
       lastYakuInfo={lastYakuInfo}
+      pendingCard={pendingCard}
     />
   );
 }

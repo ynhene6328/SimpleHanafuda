@@ -449,5 +449,6 @@ export const useHanafudaGame = () => {
         selectMatch, // Export for UI
         handleKoiKoi,
         handleShobu,
+        pendingCard, // Export for UI visualization
     };
 };
